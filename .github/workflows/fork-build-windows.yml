@@ -1,0 +1,101 @@
+name: Fork Build (Win Portable)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号 (如 v3.20.0-fork.5 或 3.20.0-fork.5，v 前缀会自动去除)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fork-build-windows
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    runs-on: windows-2022
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Update version in config files
+        shell: bash
+        run: |
+          # 去掉 v 前缀
+          VERSION="${VERSION#v}"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          # 更新 package.json
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" package.json
+          # 更新 Cargo.toml
+          sed -i "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+          # 更新 tauri.conf.json
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json
+          # fork 发布流不产出 updater 包，避免要求 signing key
+          sed -i "s/\"createUpdaterArtifacts\": true/\"createUpdaterArtifacts\": false/" src-tauri/tauri.conf.json
+          echo "Updated version to $VERSION"
+          grep -E '"version"|^version =|"createUpdaterArtifacts"' package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 10.12.3
+          run_install: false
+
+      - name: Get pnpm store directory
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> $GITHUB_OUTPUT
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: windows-x64-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: windows-x64-pnpm-store-
+
+      - name: Install frontend deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Tauri App (no bundle)
+        run: pnpm tauri build --no-bundle
+
+      - name: Prepare Portable Zip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path release-assets | Out-Null
+          $version = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
+          $exePath = 'src-tauri/target/release/cc-switch.exe'
+          if (-not (Test-Path $exePath)) {
+            Write-Error "exe not found: $exePath"
+            exit 1
+          }
+          $portableDir = 'release-assets/CC-Switch-Portable'
+          New-Item -ItemType Directory -Force -Path $portableDir | Out-Null
+          Copy-Item $exePath $portableDir
+          @('# CC Switch portable build marker', 'portable=true') |
+            Set-Content -Path (Join-Path $portableDir 'portable.ini') -Encoding UTF8
+          $zipName = "CC-Switch-v$version-Windows-Portable.zip"
+          Compress-Archive -Path "$portableDir/*" -DestinationPath "release-assets/$zipName" -Force
+          Remove-Item -Recurse -Force $portableDir
+          Write-Host "Created: $zipName"
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-portable
+          path: release-assets/*
