@@ -218,10 +218,22 @@ pub struct RectifierConfig {
     /// 仍保留「显式声明」与「上游兜底」，且不改变 Codex 模型目录声明。
     #[serde(default = "default_true")]
     pub request_media_heuristic: bool,
+    /// 请求整流：多余 system 消息降级为 user（默认关闭）
+    ///
+    /// 字节前缀缓存供应商（DeepSeek / Moonshot 等）要求请求前缀从 token 0 稳定，
+    /// 合并 system 消息会让前缀随对话新增指令而变化，导致缓存命中率骤降。
+    /// 开启后保留第一条 system 作为前缀锚点，把其余 system 消息降级为带
+    /// `[System Instruction]` 前缀的 user 消息，保持前缀稳定。
+    #[serde(default = "default_false")]
+    pub request_system_message_downgrade: bool,
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn default_false() -> bool {
+    false
 }
 
 fn default_log_level() -> String {

@@ -349,6 +349,27 @@ pub fn transform_claude_request_for_api_format(
     session_id: Option<&str>,
     shadow_store: Option<&super::gemini_shadow::GeminiShadowStore>,
 ) -> Result<serde_json::Value, ProxyError> {
+    transform_claude_request_for_api_format_with_options(
+        body,
+        provider,
+        api_format,
+        session_id,
+        shadow_store,
+        false,
+    )
+}
+
+/// 与 `transform_claude_request_for_api_format` 相同，额外接受
+/// `downgrade_extra_system`：开启时多余 system 消息降级为 user
+/// （字节前缀缓存策略，见 `transform::anthropic_to_openai_with_reasoning_content`）。
+pub fn transform_claude_request_for_api_format_with_options(
+    body: serde_json::Value,
+    provider: &Provider,
+    api_format: &str,
+    session_id: Option<&str>,
+    shadow_store: Option<&super::gemini_shadow::GeminiShadowStore>,
+    downgrade_extra_system: bool,
+) -> Result<serde_json::Value, ProxyError> {
     let is_codex_oauth = provider.is_codex_oauth();
 
     // Copilot 场景：优先从 metadata.user_id 提取 session ID 作为 cache key
@@ -437,6 +458,7 @@ pub fn transform_claude_request_for_api_format(
             let mut result = super::transform::anthropic_to_openai_with_reasoning_content(
                 body,
                 preserve_reasoning_content,
+                downgrade_extra_system,
             )?;
             // Inject prompt_cache_key only if explicitly configured in meta
             if let Some(key) = provider

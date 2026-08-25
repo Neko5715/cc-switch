@@ -17,6 +17,7 @@ export function RectifierConfigPanel() {
     requestThinkingBudget: true,
     requestMediaFallback: true,
     requestMediaHeuristic: true,
+    requestSystemMessageDowngrade: false,
   });
   const [optimizerConfig, setOptimizerConfig] = useState<OptimizerConfig>({
     enabled: false,
@@ -139,6 +140,21 @@ export function RectifierConfigPanel() {
             disabled={!config.enabled || !config.requestMediaFallback}
             onCheckedChange={(checked) =>
               handleChange({ requestMediaHeuristic: checked })
+            }
+          />
+        </div>
+        <div className="flex items-center justify-between pl-4">
+          <div className="space-y-0.5">
+            <Label>{t("settings.advanced.rectifier.systemMessageDowngrade")}</Label>
+            <p className="text-xs text-muted-foreground">
+              {t("settings.advanced.rectifier.systemMessageDowngradeDescription")}
+            </p>
+          </div>
+          <Switch
+            checked={config.requestSystemMessageDowngrade}
+            disabled={!config.enabled}
+            onCheckedChange={(checked) =>
+              handleChange({ requestSystemMessageDowngrade: checked })
             }
           />
         </div>

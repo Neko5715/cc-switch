@@ -409,7 +409,9 @@
         "mediaFallback": "不支持图片降级",
         "mediaFallbackDescription": "当供应商不支持图片输入时（已声明纯文本能力，或上游返回不支持图片的错误），自动将图片块替换为 [Unsupported Image] 标记，使对话不中断",
         "mediaHeuristic": "纯文本模型预判",
-        "mediaHeuristicDescription": "发送前根据内置的已确认纯文本模型注册表剥离图片。关闭仅停用代理的注册表预判；已声明纯文本模型的处理和上游报错兜底仍保留，且不会改变 Codex 模型目录的能力声明"
+        "mediaHeuristicDescription": "发送前根据内置的已确认纯文本模型注册表剥离图片。关闭仅停用代理的注册表预判；已声明纯文本模型的处理和上游报错兜底仍保留，且不会改变 Codex 模型目录的能力声明",
+        "systemMessageDowngrade": "保持 System 消息前缀稳定",
+        "systemMessageDowngradeDescription": "不将所有 system 消息合并，而是只保留第一条 system 消息，并将其他 system 消息降级为 user 消息，保持请求前缀稳定，提升使用字节前缀缓存供应商的缓存命中率"
       },
       "optimizer": {
         "title": "Bedrock 请求优化器",

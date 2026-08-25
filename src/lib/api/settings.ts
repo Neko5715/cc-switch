@@ -327,6 +327,7 @@ export interface RectifierConfig {
   requestThinkingBudget: boolean;
   requestMediaFallback: boolean;
   requestMediaHeuristic: boolean;
+  requestSystemMessageDowngrade: boolean;
 }
 
 export interface OptimizerConfig {

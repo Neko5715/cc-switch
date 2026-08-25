@@ -1571,13 +1571,15 @@ impl RequestForwarder {
                 let api_format = resolved_claude_api_format
                     .as_deref()
                     .unwrap_or_else(|| super::providers::get_claude_api_format(provider));
-                super::providers::transform_claude_request_for_api_format(
+                super::providers::transform_claude_request_for_api_format_with_options(
                     mapped_body,
                     provider,
                     api_format,
                     self.session_client_provided
                         .then_some(self.session_id.as_str()),
                     Some(self.gemini_shadow.as_ref()),
+                    self.rectifier_config.enabled
+                        && self.rectifier_config.request_system_message_downgrade,
                 )?
             } else {
                 adapter.transform_request(mapped_body, provider)?

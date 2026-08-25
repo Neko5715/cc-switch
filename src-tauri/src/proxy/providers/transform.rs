@@ -129,7 +129,7 @@ pub fn resolve_reasoning_effort(body: &Value) -> Option<&'static str> {
 /// 消费者），但保留其转换逻辑与下方测试套件，供代理转换路径复用 / 未来接线。
 #[allow(dead_code)]
 pub fn anthropic_to_openai(body: Value) -> Result<Value, ProxyError> {
-    anthropic_to_openai_with_reasoning_content(body, false)
+    anthropic_to_openai_with_reasoning_content(body, false, false)
 }
 
 /// Anthropic 请求 → OpenAI Chat Completions 请求
@@ -137,9 +137,14 @@ pub fn anthropic_to_openai(body: Value) -> Result<Value, ProxyError> {
 /// `preserve_reasoning_content` 仅用于明确需要 DeepSeek/MiMo
 /// `reasoning_content` 兼容字段的 provider。默认转换保持通用 OpenAI-compatible
 /// 请求体，避免向严格后端发送未知字段。
+///
+/// `downgrade_extra_system` 开启时，多余 system 消息不合并而是降级为
+/// 带 `[System Instruction]` 前缀的 user 消息，用于字节前缀缓存供应商
+/// （DeepSeek / Moonshot 等）保持请求前缀稳定，提升缓存命中率。
 pub fn anthropic_to_openai_with_reasoning_content(
     body: Value,
     preserve_reasoning_content: bool,
+    downgrade_extra_system: bool,
 ) -> Result<Value, ProxyError> {
     let mut result = json!({});
 
@@ -180,7 +185,7 @@ pub fn anthropic_to_openai_with_reasoning_content(
         }
     }
 
-    normalize_openai_system_messages(&mut messages);
+    normalize_openai_system_messages(&mut messages, downgrade_extra_system);
     result["messages"] = json!(messages);
 
     // 转换参数 — o-series 模型需要 max_completion_tokens
@@ -305,7 +310,7 @@ fn map_tool_choice_to_chat(tool_choice: &Value) -> Value {
     }
 }
 
-fn normalize_openai_system_messages(messages: &mut Vec<Value>) {
+fn normalize_openai_system_messages(messages: &mut Vec<Value>, downgrade_extra_system: bool) {
     let system_count = messages
         .iter()
         .filter(|message| message.get("role").and_then(|value| value.as_str()) == Some("system"))
@@ -316,6 +321,39 @@ fn normalize_openai_system_messages(messages: &mut Vec<Value>) {
     }
 
     if system_count == 1 {
+        if let Some(index) = messages.iter().position(|message| {
+            message.get("role").and_then(|value| value.as_str()) == Some("system")
+        }) {
+            if index > 0 {
+                let message = messages.remove(index);
+                messages.insert(0, message);
+            }
+        }
+        return;
+    }
+
+    // 字节前缀缓存策略（DeepSeek / Moonshot 等）：保留第一条 system 作为
+    // 前缀锚点，把其余 system 消息降级为带 [System Instruction] 前缀的
+    // user 消息。合并会让拼接文本随对话新增指令而变化，导致整个前缀失效、
+    // 缓存命中率骤降；降级则保持 token 0 起的前缀稳定。
+    if downgrade_extra_system {
+        let mut first_system_seen = false;
+        for message in messages.iter_mut() {
+            if message.get("role").and_then(|value| value.as_str()) != Some("system") {
+                continue;
+            }
+            if first_system_seen {
+                message["role"] = json!("user");
+                if let Some(Value::String(text)) = message.get("content") {
+                    if !text.is_empty() {
+                        message["content"] = json!(format!("[System Instruction]\n{}", text));
+                    }
+                }
+            } else {
+                first_system_seen = true;
+            }
+        }
+        // 确保首条 system 位于 index 0
         if let Some(index) = messages.iter().position(|message| {
             message.get("role").and_then(|value| value.as_str()) == Some("system")
         }) {
@@ -820,6 +858,92 @@ mod tests {
     }
 
     #[test]
+    fn test_openai_system_downgrade_keeps_first_and_downgrades_rest() {
+        let input = json!({
+            "model": "claude-3-sonnet",
+            "max_tokens": 1024,
+            "system": [
+                {"type": "text", "text": "Stable base prompt"},
+                {"type": "text", "text": "Dynamic instruction 1"},
+                {"type": "text", "text": "Dynamic instruction 2"}
+            ],
+            "messages": [{"role": "user", "content": "Hello"}]
+        });
+
+        let result = anthropic_to_openai_with_reasoning_content(input, false, true).unwrap();
+        let messages = result["messages"].as_array().unwrap();
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(messages[0]["content"], "Stable base prompt");
+        assert_eq!(messages[1]["role"], "user");
+        assert_eq!(
+            messages[1]["content"],
+            "[System Instruction]\nDynamic instruction 1"
+        );
+        assert_eq!(messages[2]["role"], "user");
+        assert_eq!(
+            messages[2]["content"],
+            "[System Instruction]\nDynamic instruction 2"
+        );
+        assert_eq!(messages[3]["role"], "user");
+        assert_eq!(messages[3]["content"], "Hello");
+    }
+
+    #[test]
+    fn test_openai_system_downgrade_default_still_merges() {
+        let input = json!({
+            "model": "claude-3-sonnet",
+            "max_tokens": 1024,
+            "system": [
+                {"type": "text", "text": "Stable base prompt"},
+                {"type": "text", "text": "Dynamic instruction 1"}
+            ],
+            "messages": [{"role": "user", "content": "Hello"}]
+        });
+
+        let result = anthropic_to_openai_with_reasoning_content(input, false, false).unwrap();
+        let messages = result["messages"].as_array().unwrap();
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(
+            messages[0]["content"],
+            "Stable base prompt\nDynamic instruction 1"
+        );
+        assert_eq!(messages[1]["role"], "user");
+        assert_eq!(messages[1]["content"], "Hello");
+    }
+
+    #[test]
+    fn test_openai_system_downgrade_covers_messages_array_system_entries() {
+        // 模拟 Claude Code 动态追加 system prompt：system 字段稳定 + messages 内动态追加 role=system
+        let input = json!({
+            "model": "claude-3-sonnet",
+            "max_tokens": 1024,
+            "system": "Stable base prompt",
+            "messages": [
+                {"role": "system", "content": "Appended context 1"},
+                {"role": "system", "content": "Appended context 2"},
+                {"role": "user", "content": "Hello"}
+            ]
+        });
+
+        let result = anthropic_to_openai_with_reasoning_content(input, false, true).unwrap();
+        let messages = result["messages"].as_array().unwrap();
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(messages[0]["content"], "Stable base prompt");
+        assert_eq!(messages[1]["role"], "user");
+        assert_eq!(
+            messages[1]["content"],
+            "[System Instruction]\nAppended context 1"
+        );
+        assert_eq!(messages[2]["role"], "user");
+        assert_eq!(
+            messages[2]["content"],
+            "[System Instruction]\nAppended context 2"
+        );
+        assert_eq!(messages[3]["role"], "user");
+        assert_eq!(messages[3]["content"], "Hello");
+    }
+
+    #[test]
     fn test_anthropic_to_openai_preserves_prompt_after_billing_header_in_same_part() {
         let input = json!({
             "model": "claude-3-sonnet",
@@ -1045,7 +1169,7 @@ mod tests {
             }]
         });
 
-        let result = anthropic_to_openai_with_reasoning_content(input, true).unwrap();
+        let result = anthropic_to_openai_with_reasoning_content(input, true, false).unwrap();
         let msg = &result["messages"][0];
         assert_eq!(msg["role"], "assistant");
         assert_eq!(msg["reasoning_content"], "I should call the tool.");
@@ -1066,7 +1190,7 @@ mod tests {
             }]
         });
 
-        let result = anthropic_to_openai_with_reasoning_content(input, true).unwrap();
+        let result = anthropic_to_openai_with_reasoning_content(input, true, false).unwrap();
         let msg = &result["messages"][0];
         assert_eq!(msg["role"], "assistant");
         assert_eq!(msg["reasoning_content"], "tool call");
@@ -1088,7 +1212,7 @@ mod tests {
             }]
         });
 
-        let result = anthropic_to_openai_with_reasoning_content(input, true).unwrap();
+        let result = anthropic_to_openai_with_reasoning_content(input, true, false).unwrap();
         let msg = &result["messages"][0];
         assert_eq!(msg["reasoning_content"], "[redacted thinking]");
         assert_eq!(msg["tool_calls"][0]["id"], "call_123");
@@ -1436,7 +1560,7 @@ mod tests {
                 "content": anthropic_response["content"].clone()
             }]
         });
-        let replayed = anthropic_to_openai_with_reasoning_content(follow_up_request, true).unwrap();
+        let replayed = anthropic_to_openai_with_reasoning_content(follow_up_request, true, false).unwrap();
         let msg = &replayed["messages"][0];
 
         assert_eq!(

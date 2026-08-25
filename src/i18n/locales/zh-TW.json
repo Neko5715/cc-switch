@@ -409,7 +409,9 @@
         "mediaFallback": "不支援圖片降級",
         "mediaFallbackDescription": "當供應商不支援圖片輸入時（已宣告純文字能力，或上游回傳不支援圖片的錯誤），自動將圖片區塊替換為 [Unsupported Image] 標記，使對話不中斷",
         "mediaHeuristic": "純文字模型預判",
-        "mediaHeuristicDescription": "傳送前依內建的已確認純文字模型登錄表移除圖片。關閉只會停用代理的登錄表預判；已宣告純文字模型的處理與上游錯誤兜底仍會保留，且不會改變 Codex 模型目錄的能力宣告"
+        "mediaHeuristicDescription": "傳送前依內建的已確認純文字模型登錄表移除圖片。關閉只會停用代理的登錄表預判；已宣告純文字模型的處理與上游錯誤兜底仍會保留，且不會改變 Codex 模型目錄的能力宣告",
+        "systemMessageDowngrade": "保持 System 訊息前綴穩定",
+        "systemMessageDowngradeDescription": "不將所有 system 訊息合併，而是只保留第一條 system 訊息，並將其他 system 訊息降級為 user 訊息，保持請求前綴穩定，提升使用位元組前綴快取的供應商之緩存命中率"
       },
       "optimizer": {
         "title": "Bedrock 請求最佳化工具",
