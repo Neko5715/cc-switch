@@ -248,6 +248,7 @@ impl Default for RectifierConfig {
             request_thinking_budget: true,
             request_media_fallback: true,
             request_media_heuristic: true,
+            request_system_message_downgrade: false,
         }
     }
 }

@@ -145,9 +145,13 @@ export function RectifierConfigPanel() {
         </div>
         <div className="flex items-center justify-between pl-4">
           <div className="space-y-0.5">
-            <Label>{t("settings.advanced.rectifier.systemMessageDowngrade")}</Label>
+            <Label>
+              {t("settings.advanced.rectifier.systemMessageDowngrade")}
+            </Label>
             <p className="text-xs text-muted-foreground">
-              {t("settings.advanced.rectifier.systemMessageDowngradeDescription")}
+              {t(
+                "settings.advanced.rectifier.systemMessageDowngradeDescription",
+              )}
             </p>
           </div>
           <Switch

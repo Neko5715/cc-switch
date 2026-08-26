@@ -1560,7 +1560,8 @@ mod tests {
                 "content": anthropic_response["content"].clone()
             }]
         });
-        let replayed = anthropic_to_openai_with_reasoning_content(follow_up_request, true, false).unwrap();
+        let replayed =
+            anthropic_to_openai_with_reasoning_content(follow_up_request, true, false).unwrap();
         let msg = &replayed["messages"][0];
 
         assert_eq!(
